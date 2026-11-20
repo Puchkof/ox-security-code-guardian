@@ -15,7 +15,11 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "test": "jest",
-    "test:cov": "jest --coverage"
+    "test:cov": "jest --coverage",
+    "bench:build": "pnpm -C packages/core build && pnpm -C packages/infrastructure build:bench",
+    "bench:gen": "pnpm -C packages/infrastructure gen:report ../../fixtures/generated/trivy-600mb.json 600",
+    "bench:parse": "pnpm -C packages/infrastructure bench:parse ../../fixtures/generated/trivy-600mb.json",
+    "bench:naive": "pnpm -C packages/infrastructure bench:naive ../../fixtures/generated/trivy-600mb.json"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.5",

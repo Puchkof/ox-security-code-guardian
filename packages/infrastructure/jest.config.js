@@ -9,5 +9,4 @@ module.exports = {
     '^@code-guardian/core$': '<rootDir>/../core/src',
     '^@code-guardian/core/testing$': '<rootDir>/../core/src/testing',
   },
-  passWithNoTests: true,
 };
