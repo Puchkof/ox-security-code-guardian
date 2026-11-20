@@ -1,4 +1,5 @@
 import { InvalidRepoUrlError, QueueUnavailableError, ScanNotFoundError } from '@code-guardian/core';
+import { InvalidCursorError } from '@code-guardian/infrastructure';
 import { HttpException, HttpStatus } from '@nestjs/common';
 import { RequestValidationError } from './request-validation.error';
 
@@ -25,7 +26,11 @@ const INTERNAL: ErrorDescriptor = {
  * message, so internals (stack traces, SQL, file paths) never leak.
  */
 export function describeError(error: unknown): ErrorDescriptor {
-  if (error instanceof RequestValidationError || error instanceof InvalidRepoUrlError) {
+  if (
+    error instanceof RequestValidationError ||
+    error instanceof InvalidRepoUrlError ||
+    error instanceof InvalidCursorError
+  ) {
     return { status: HttpStatus.BAD_REQUEST, code: error.code, message: error.message };
   }
   if (error instanceof ScanNotFoundError) {

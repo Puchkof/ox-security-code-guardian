@@ -1,79 +1,73 @@
-import { join } from 'node:path';
+import { type Logger } from '@code-guardian/core';
 import {
-  type ReportParser,
-  type RepositoryCloner,
-  type ScanWorkspace,
-  type SecurityScanner,
-  type Vulnerability,
-  type WorkspaceProvider,
-} from '@code-guardian/core';
-import { Global, Module } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
-import { type WorkerEnv } from '../config/env.schema';
+  GitCliCloner,
+  StreamingTrivyReportParser,
+  TmpWorkspaceProvider,
+  TrivyCliScanner,
+} from '@code-guardian/infrastructure';
 import {
+  LOGGER,
   REPORT_PARSER,
   REPOSITORY_CLONER,
   SECURITY_SCANNER,
   WORKSPACE_PROVIDER,
-} from '../shared/port.tokens';
-import { AdapterNotConfiguredError } from './adapter-not-configured.error';
+} from '@code-guardian/nest-common';
+import { Global, Inject, Module, type OnApplicationBootstrap } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
+import { type WorkerEnv } from '../config/env.schema';
 
-/** TODO(infrastructure): TmpWorkspaceProvider (SCAN_WORK_DIR, MIN_FREE_BYTES). */
-class PlaceholderWorkspaceProvider implements WorkspaceProvider {
-  constructor(private readonly workDir: string) {}
+/** Removes workspaces left behind by a crashed or OOM-killed worker before taking new jobs. */
+class OrphanWorkspaceSweeper implements OnApplicationBootstrap {
+  constructor(
+    @Inject(WORKSPACE_PROVIDER) private readonly workspaces: TmpWorkspaceProvider,
+    @Inject(LOGGER) private readonly logger: Logger,
+    private readonly config: ConfigService<WorkerEnv, true>,
+  ) {}
 
-  create(scanId: string): Promise<ScanWorkspace> {
-    const root = join(this.workDir, scanId);
-    return Promise.resolve({
-      sourceDir: join(root, 'repo'),
-      reportFile: join(root, 'report.json'),
-      dispose: () => Promise.resolve(),
-    });
+  async onApplicationBootstrap(): Promise<void> {
+    const olderThanMs = this.config.get('ORPHAN_WORKSPACE_MAX_AGE_MS', { infer: true });
+    try {
+      const removed = await this.workspaces.sweepOrphans(olderThanMs);
+      if (removed > 0) this.logger.info('Removed orphaned scan workspaces', { removed });
+    } catch (error: unknown) {
+      this.logger.warn('Orphaned workspace sweep failed', { error });
+    }
   }
 }
 
-/** TODO(infrastructure): GitCliCloner (CLONE_TIMEOUT_MS is applied by the core handler). */
-class PlaceholderCloner implements RepositoryCloner {
-  clone(): Promise<void> {
-    return Promise.reject(new AdapterNotConfiguredError('RepositoryCloner'));
-  }
-}
-
-/** TODO(infrastructure): TrivyCliScanner (TRIVY_SERVER_URL for client/server mode). */
-class PlaceholderScanner implements SecurityScanner {
-  scan(): Promise<void> {
-    return Promise.reject(new AdapterNotConfiguredError('SecurityScanner'));
-  }
-}
-
-/** TODO(infrastructure): StreamingTrivyReportParser. */
-class PlaceholderReportParser implements ReportParser {
-  stream(): AsyncIterable<Vulnerability> {
-    return {
-      [Symbol.asyncIterator]: () => ({
-        next: () => Promise.reject(new AdapterNotConfiguredError('ReportParser')),
-      }),
-    };
-  }
-}
-
-/**
- * The clone → scan → parse adapters used by ExecuteScanHandler.
- * Placeholders fail every job with a non-retryable error until the real adapters from
- * @code-guardian/infrastructure replace these providers.
- */
+/** The clone → scan → parse adapters used by ExecuteScanHandler. */
 @Global()
 @Module({
   providers: [
     {
       provide: WORKSPACE_PROVIDER,
       useFactory: (config: ConfigService<WorkerEnv, true>) =>
-        new PlaceholderWorkspaceProvider(config.get('SCAN_WORK_DIR', { infer: true })),
+        new TmpWorkspaceProvider({
+          baseDir: config.get('SCAN_WORK_DIR', { infer: true }),
+          minFreeBytes: config.get('MIN_FREE_BYTES', { infer: true }),
+        }),
       inject: [ConfigService],
     },
-    { provide: REPOSITORY_CLONER, useFactory: () => new PlaceholderCloner() },
-    { provide: SECURITY_SCANNER, useFactory: () => new PlaceholderScanner() },
-    { provide: REPORT_PARSER, useFactory: () => new PlaceholderReportParser() },
+    { provide: REPOSITORY_CLONER, useFactory: () => new GitCliCloner() },
+    {
+      provide: SECURITY_SCANNER,
+      useFactory: (config: ConfigService<WorkerEnv, true>) => {
+        const serverUrl = config.get('TRIVY_SERVER_URL', { infer: true });
+        const cacheDir = config.get('TRIVY_CACHE_DIR', { infer: true });
+        return new TrivyCliScanner({
+          trivyBinary: config.get('TRIVY_BINARY', { infer: true }),
+          ...(serverUrl === undefined ? {} : { serverUrl }),
+          ...(cacheDir === undefined ? {} : { cacheDir }),
+        });
+      },
+      inject: [ConfigService],
+    },
+    {
+      provide: REPORT_PARSER,
+      useFactory: (logger: Logger) => new StreamingTrivyReportParser({ logger }),
+      inject: [LOGGER],
+    },
+    OrphanWorkspaceSweeper,
   ],
   exports: [WORKSPACE_PROVIDER, REPOSITORY_CLONER, SECURITY_SCANNER, REPORT_PARSER],
 })

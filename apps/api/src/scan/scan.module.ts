@@ -11,7 +11,7 @@ import {
   type VulnerabilityRepository,
 } from '@code-guardian/core';
 import { Module } from '@nestjs/common';
-import { bindCommandHandler, bindQueryHandler } from '../shared/cqrs-binding';
+import { bindCommandHandler, bindQueryHandler } from '@code-guardian/nest-common';
 import {
   CLOCK,
   ID_GENERATOR,
@@ -19,7 +19,7 @@ import {
   SCAN_JOB_QUEUE,
   SCAN_REPOSITORY,
   VULNERABILITY_REPOSITORY,
-} from '../shared/port.tokens';
+} from '@code-guardian/nest-common';
 import { ScanResolver } from './graphql/scan.resolver';
 import { ScanController } from './http/scan.controller';
 

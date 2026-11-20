@@ -3,9 +3,9 @@ import { Module, type DynamicModule } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { CqrsModule } from '@nestjs/cqrs';
 import { LoggerModule } from 'nestjs-pino';
-import { PersistenceModule } from './adapters/persistence.module';
+import { PersistenceModule, SystemModule } from '@code-guardian/nest-common';
+import { Redis } from 'ioredis';
 import { ScanPipelineModule } from './adapters/scan-pipeline.module';
-import { SystemModule } from './adapters/system.module';
 import { validateWorkerEnv, type WorkerEnv } from './config/env.schema';
 import { ScanWorkerModule } from './scan/scan-worker.module';
 
@@ -30,14 +30,13 @@ export class WorkerModule {
           inject: [ConfigService],
           useFactory: (config: ConfigService<WorkerEnv, true>) => ({
             // Workers block on Redis; ioredis must not give up on long-running commands.
-            connection: {
-              url: config.get('REDIS_URL', { infer: true }),
+            connection: new Redis(config.get('REDIS_URL', { infer: true }), {
               maxRetriesPerRequest: null,
-            },
+            }),
           }),
         }),
         CqrsModule.forRoot(),
-        PersistenceModule,
+        PersistenceModule.prisma(),
         SystemModule,
         ScanPipelineModule,
         ScanWorkerModule,

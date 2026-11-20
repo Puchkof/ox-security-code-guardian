@@ -13,7 +13,7 @@ import { Test } from '@nestjs/testing';
 import { UnrecoverableError, type Job, type Worker } from 'bullmq';
 import { SilentLogger } from '@code-guardian/core/testing';
 import { WORKER_CONCURRENCY } from '../src/scan/scan-queue';
-import { LOGGER } from '../src/shared/port.tokens';
+import { LOGGER } from '@code-guardian/nest-common';
 import { ScanProcessor } from '../src/scan/scan.processor';
 
 /** Stands in for the core ExecuteScanHandler behind the real CommandBus. */

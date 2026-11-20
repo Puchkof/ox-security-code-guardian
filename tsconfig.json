@@ -4,6 +4,6 @@
     "noEmit": true,
     "types": ["node", "jest"]
   },
-  "include": ["packages/*/src", "packages/*/test", "apps/*/src", "apps/*/test", "scripts"],
+  "include": ["src", "packages/*/src", "packages/*/test", "apps/*/src", "apps/*/test", "scripts"],
   "exclude": ["apps/web", "**/dist"]
 }

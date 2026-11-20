@@ -1,0 +1,11 @@
+**/node_modules
+**/dist
+**/coverage
+**/*.tsbuildinfo
+.git
+.claude
+fixtures
+docs
+*.md
+.env
+.env.*

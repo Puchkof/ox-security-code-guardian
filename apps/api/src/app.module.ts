@@ -1,12 +1,19 @@
+import { PersistenceModule, SystemModule } from '@code-guardian/nest-common';
 import { Module, type DynamicModule } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { CqrsModule } from '@nestjs/cqrs';
 import { LoggerModule } from 'nestjs-pino';
-import { PersistenceModule } from './adapters/persistence.module';
 import { QueueModule } from './adapters/queue.module';
-import { SystemModule } from './adapters/system.module';
 import { ApiModule } from './api.module';
 import { validateApiEnv, type ApiEnv } from './config/env.schema';
+
+export interface AppModuleOptions {
+  /**
+   * `infrastructure` (default): PostgreSQL + Redis/BullMQ.
+   * `in-memory`: process-local fakes, no external services (tests and quick demos only).
+   */
+  readonly adapters?: 'infrastructure' | 'in-memory';
+}
 
 /**
  * Root of the API process: config, logging, CQRS buses, port adapters and the API surface.
@@ -15,7 +22,8 @@ import { validateApiEnv, type ApiEnv } from './config/env.schema';
  */
 @Module({})
 export class AppModule {
-  static forRoot(): DynamicModule {
+  static forRoot(options: AppModuleOptions = {}): DynamicModule {
+    const inMemory = options.adapters === 'in-memory';
     return {
       module: AppModule,
       imports: [
@@ -30,8 +38,8 @@ export class AppModule {
           }),
         }),
         CqrsModule.forRoot(),
-        PersistenceModule,
-        QueueModule,
+        inMemory ? PersistenceModule.inMemory() : PersistenceModule.prisma(),
+        inMemory ? QueueModule.inMemory() : QueueModule.bullmq(),
         SystemModule,
         ApiModule,
       ],

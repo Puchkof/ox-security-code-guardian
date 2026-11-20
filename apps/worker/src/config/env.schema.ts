@@ -22,9 +22,16 @@ export const workerEnvSchema = z.object({
     .int()
     .nonnegative()
     .default(1024 ** 3),
-  // Infrastructure: optional until the real adapters are wired in.
+  /** Workspaces older than this found at startup belong to a dead worker and are deleted. */
+  ORPHAN_WORKSPACE_MAX_AGE_MS: positiveInt.default(60 * 60 * 1000),
+  TRIVY_BINARY: z.string().min(1).default('trivy'),
+  /**
+   * Client/server mode: the vulnerability DB and matching run in the Trivy server, so the
+   * worker container only pays for file analysis. Unset = standalone (DB in TRIVY_CACHE_DIR).
+   */
   TRIVY_SERVER_URL: z.url().optional(),
-  DATABASE_URL: z.url().optional(),
+  TRIVY_CACHE_DIR: z.string().min(1).optional(),
+  DATABASE_URL: z.url(),
 });
 
 export type WorkerEnv = z.output<typeof workerEnvSchema>;

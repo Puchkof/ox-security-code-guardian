@@ -2,10 +2,10 @@ import { type INestApplication } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { NestFactory } from '@nestjs/core';
 import { Logger } from 'nestjs-pino';
-import { AppModule } from './app.module';
+import { AppModule, type AppModuleOptions } from './app.module';
 import { type ApiEnv } from './config/env.schema';
 
-export interface ApiBootstrapOptions {
+export interface ApiBootstrapOptions extends AppModuleOptions {
   /** Port to listen on; overrides PORT. `0` picks a free port. */
   readonly port?: number;
   /**
@@ -37,10 +37,13 @@ export async function bootstrapApi(options: ApiBootstrapOptions = {}): Promise<I
   const installGlobalLogger = options.installGlobalLogger ?? true;
   // Nest declares its options bag as a class; a plain literal is the documented usage.
   // eslint-disable-next-line @typescript-eslint/no-unsafe-class-instance-assignment
-  const app = await NestFactory.create(AppModule.forRoot(), {
-    // Buffered logs are flushed by useLogger(); without it they would be held forever.
-    bufferLogs: installGlobalLogger,
-  });
+  const app = await NestFactory.create(
+    AppModule.forRoot({ adapters: options.adapters ?? 'infrastructure' }),
+    {
+      // Buffered logs are flushed by useLogger(); without it they would be held forever.
+      bufferLogs: installGlobalLogger,
+    },
+  );
   try {
     configureApp(app, options);
     const config = app.get<ConfigService<ApiEnv, true>>(ConfigService);

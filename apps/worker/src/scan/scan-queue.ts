@@ -1,7 +1,8 @@
+import { SCAN_QUEUE } from '@code-guardian/infrastructure';
 import { z } from 'zod';
 
-/** Must match the producer (BullMqScanJobQueue). */
-export const SCAN_QUEUE_NAME = 'scans';
+/** Same constant as the producer (BullMqScanJobQueue), so the two can never drift apart. */
+export const SCAN_QUEUE_NAME = SCAN_QUEUE;
 
 export const scanJobDataSchema = z.object({ scanId: z.string().min(1) });
 export type ScanJobData = z.output<typeof scanJobDataSchema>;

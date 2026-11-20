@@ -13,7 +13,12 @@ describe('bootstrapApi', () => {
 
   it('starts a listening app without touching process signal handlers', async () => {
     const sigtermListeners = process.listenerCount('SIGTERM');
-    app = await bootstrapApi({ port: 0, handleSignals: false, installGlobalLogger: false });
+    app = await bootstrapApi({
+      port: 0,
+      adapters: 'in-memory',
+      handleSignals: false,
+      installGlobalLogger: false,
+    });
 
     await request(app.getHttpServer()).get('/health').expect(200);
     expect(process.listenerCount('SIGTERM')).toBe(sigtermListeners);

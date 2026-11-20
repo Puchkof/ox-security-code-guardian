@@ -4,7 +4,7 @@ import { CommandBus } from '@nestjs/cqrs';
 import { OnWorkerEvent, Processor, WorkerHost } from '@nestjs/bullmq';
 import { UnrecoverableError, type Job } from 'bullmq';
 import { SCAN_QUEUE_NAME, WORKER_CONCURRENCY, scanJobDataSchema } from './scan-queue';
-import { LOGGER } from '../shared/port.tokens';
+import { LOGGER } from '@code-guardian/nest-common';
 import { toWorkerError } from './to-worker-error';
 
 /** BullMQ transport: turns a job into an ExecuteScanCommand and maps the outcome for retries. */

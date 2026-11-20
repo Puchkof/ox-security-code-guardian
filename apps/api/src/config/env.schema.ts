@@ -16,7 +16,7 @@ export const apiEnvSchema = z.object({
         .map((origin) => origin.trim())
         .filter((origin) => origin.length > 0),
     ),
-  // Infrastructure: optional until the real adapters are wired in.
+  // Required by the default `infrastructure` adapters (checked when they are created).
   DATABASE_URL: z.url().optional(),
   REDIS_URL: z.url().optional(),
 });

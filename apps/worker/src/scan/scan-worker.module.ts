@@ -15,7 +15,7 @@ import { BullModule } from '@nestjs/bullmq';
 import { Module } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { type WorkerEnv } from '../config/env.schema';
-import { bindCommandHandler } from '../shared/cqrs-binding';
+import { bindCommandHandler } from '@code-guardian/nest-common';
 import {
   CLOCK,
   LOGGER,
@@ -26,7 +26,7 @@ import {
   SECURITY_SCANNER,
   VULNERABILITY_REPOSITORY,
   WORKSPACE_PROVIDER,
-} from '../shared/port.tokens';
+} from '@code-guardian/nest-common';
 import { SCAN_QUEUE_NAME, WORKER_CONCURRENCY } from './scan-queue';
 import { ScanProcessor } from './scan.processor';
 

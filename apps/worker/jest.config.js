@@ -9,5 +9,7 @@ module.exports = {
   moduleNameMapper: {
     '^@code-guardian/core$': '<rootDir>/../../packages/core/src',
     '^@code-guardian/core/testing$': '<rootDir>/../../packages/core/src/testing',
+    '^@code-guardian/infrastructure$': '<rootDir>/../../packages/infrastructure/src',
+    '^@code-guardian/nest-common$': '<rootDir>/../../packages/nest-common/src',
   },
 };

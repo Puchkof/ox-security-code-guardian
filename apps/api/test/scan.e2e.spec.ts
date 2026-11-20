@@ -26,7 +26,7 @@ import {
   SCAN_JOB_QUEUE,
   SCAN_REPOSITORY,
   VULNERABILITY_REPOSITORY,
-} from '../src/shared/port.tokens';
+} from '@code-guardian/nest-common';
 
 const REPO = 'https://github.com/OWASP/NodeGoat';
 
@@ -49,7 +49,9 @@ describe('Scan API (e2e, in-memory adapters)', () => {
 
   beforeEach(async () => {
     clock = new FixedClock();
-    const moduleRef = await Test.createTestingModule({ imports: [AppModule.forRoot()] })
+    const moduleRef = await Test.createTestingModule({
+      imports: [AppModule.forRoot({ adapters: 'in-memory' })],
+    })
       .overrideProvider(CLOCK)
       .useValue(clock)
       .overrideProvider(ID_GENERATOR)

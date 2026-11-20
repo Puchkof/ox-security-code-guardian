@@ -1,0 +1,121 @@
+name: code-guardian
+
+# Shared settings for the two roles of the backend image.
+x-backend: &backend
+  build:
+    context: .
+    dockerfile: Dockerfile
+  image: code-guardian-backend:local
+  restart: unless-stopped
+  # The assignment's budget: 200MB per container, V8 heap capped at 150MB (NODE_OPTIONS in the image).
+  # memswap_limit = mem_limit disables swap, so exceeding the budget really OOM-kills.
+  mem_limit: 200m
+  memswap_limit: 200m
+
+x-backend-env: &backend-env
+  LOG_LEVEL: info
+  DATABASE_URL: postgresql://guardian:guardian@postgres:5432/guardian?connection_limit=5
+  REDIS_URL: redis://redis:6379
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: guardian
+      POSTGRES_PASSWORD: guardian
+      POSTGRES_DB: guardian
+    # Host port is configurable to avoid clashing with other local databases.
+    ports: ['${POSTGRES_HOST_PORT:-15432}:5432']
+    volumes: [pgdata:/var/lib/postgresql/data]
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U guardian -d guardian']
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  redis:
+    image: redis:7-alpine
+    command: ['redis-server', '--appendonly', 'yes', '--maxmemory-policy', 'noeviction']
+    ports: ['${REDIS_HOST_PORT:-16379}:6379']
+    volumes: [redisdata:/data]
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  # Holds the vulnerability DB and does the matching, outside the memory-constrained worker.
+  # The first start downloads the DB, which can take a minute.
+  trivy-server:
+    image: aquasec/trivy:0.76.2
+    command: ['server', '--listen', '0.0.0.0:4954', '--cache-dir', '/cache']
+    ports: ['4954:4954']
+    volumes: [trivy-cache:/cache]
+    healthcheck:
+      test: ['CMD-SHELL', 'wget -qO- http://127.0.0.1:4954/healthz || exit 1']
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 30s
+
+  migrate:
+    <<: *backend
+    restart: 'no'
+    environment: *backend-env
+    command:
+      - packages/infrastructure/node_modules/.bin/prisma
+      - migrate
+      - deploy
+      - --schema
+      - packages/infrastructure/prisma/schema.prisma
+    depends_on:
+      postgres: { condition: service_healthy }
+
+  api:
+    <<: *backend
+    environment:
+      <<: *backend-env
+      APP_MODE: api
+      PORT: 3000
+      CORS_ORIGINS: http://localhost:8080,http://localhost:5173
+    ports: ['3000:3000']
+    healthcheck:
+      test: ['CMD-SHELL', 'wget -qO- http://127.0.0.1:3000/health || exit 1']
+      interval: 10s
+      timeout: 3s
+      retries: 10
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+      redis: { condition: service_healthy }
+
+  worker:
+    <<: *backend
+    environment:
+      <<: *backend-env
+      APP_MODE: worker
+      WORKER_CONCURRENCY: 1
+      TRIVY_SERVER_URL: http://trivy-server:4954
+      # A volume, not tmpfs: tmpfs pages are charged to the container's memory limit.
+      SCAN_WORK_DIR: /scans
+      MIN_FREE_BYTES: '524288000'
+    volumes: [scans:/scans]
+    stop_grace_period: 2m
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+      redis: { condition: service_healthy }
+      trivy-server: { condition: service_healthy }
+
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+      args:
+        VITE_API_URL: http://localhost:3000
+    ports: ['8080:80']
+    depends_on: [api]
+
+volumes:
+  pgdata:
+  redisdata:
+  trivy-cache:
+  scans:

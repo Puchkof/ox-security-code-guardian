@@ -5,7 +5,9 @@
     "types": ["node", "jest"],
     "paths": {
       "@code-guardian/core": ["../../packages/core/src/index.ts"],
-      "@code-guardian/core/testing": ["../../packages/core/src/testing/index.ts"]
+      "@code-guardian/core/testing": ["../../packages/core/src/testing/index.ts"],
+      "@code-guardian/infrastructure": ["../../packages/infrastructure/src/index.ts"],
+      "@code-guardian/nest-common": ["../../packages/nest-common/src/index.ts"]
     }
   },
   "include": ["src", "test"]
