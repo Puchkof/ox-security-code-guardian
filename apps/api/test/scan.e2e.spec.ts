@@ -49,7 +49,7 @@ describe('Scan API (e2e, in-memory adapters)', () => {
 
   beforeEach(async () => {
     clock = new FixedClock();
-    const moduleRef = await Test.createTestingModule({ imports: [AppModule] })
+    const moduleRef = await Test.createTestingModule({ imports: [AppModule.forRoot()] })
       .overrideProvider(CLOCK)
       .useValue(clock)
       .overrideProvider(ID_GENERATOR)
