@@ -35,15 +35,11 @@ export function configureApp(app: INestApplication, options: ApiBootstrapOptions
  */
 export async function bootstrapApi(options: ApiBootstrapOptions = {}): Promise<INestApplication> {
   const installGlobalLogger = options.installGlobalLogger ?? true;
+  const rootModule = AppModule.forRoot({ adapters: options.adapters ?? 'infrastructure' });
   // Nest declares its options bag as a class; a plain literal is the documented usage.
+  // Buffered logs are flushed by useLogger(); without it they would be held forever.
   // eslint-disable-next-line @typescript-eslint/no-unsafe-class-instance-assignment
-  const app = await NestFactory.create(
-    AppModule.forRoot({ adapters: options.adapters ?? 'infrastructure' }),
-    {
-      // Buffered logs are flushed by useLogger(); without it they would be held forever.
-      bufferLogs: installGlobalLogger,
-    },
-  );
+  const app = await NestFactory.create(rootModule, { bufferLogs: installGlobalLogger });
   try {
     configureApp(app, options);
     const config = app.get<ConfigService<ApiEnv, true>>(ConfigService);
