@@ -43,6 +43,12 @@ describeWithDocker('BullMqScanJobQueue (Redis)', () => {
     expect(job?.opts.backoff).toEqual(DEFAULT_SCAN_JOB_OPTIONS.backoff);
   });
 
+  it('reports job states for the reaper', async () => {
+    await adapter.enqueue({ scanId: 'scan-state' });
+    expect(await adapter.getJobState('scan-state')).toBe('pending');
+    expect(await adapter.getJobState('never-enqueued')).toBe('missing');
+  });
+
   it('deduplicates repeated enqueues of the same scan', async () => {
     await adapter.enqueue({ scanId: 'scan-2' });
     await adapter.enqueue({ scanId: 'scan-2' });

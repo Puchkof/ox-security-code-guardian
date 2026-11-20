@@ -29,8 +29,13 @@ model Scan {
   updatedAt       DateTime        @map("updated_at") @db.Timestamptz(3)
   startedAt       DateTime?       @map("started_at") @db.Timestamptz(3)
   finishedAt      DateTime?       @map("finished_at") @db.Timestamptz(3)
+  /// Attempt that owns the visible findings (see Vulnerability.runId).
+  runId           String?         @map("run_id") @db.Uuid
+  /// Optimistic-concurrency version; every write is `WHERE id = ? AND version = ?`.
+  version         Int             @default(1)
   vulnerabilities Vulnerability[]
 
+  @@index([status, updatedAt])
   @@map("scans")
 }
 
@@ -46,8 +51,10 @@ model Vulnerability {
   title            String? @db.Text
   primaryUrl       String? @map("primary_url") @db.Text
   target           String  @db.Text
+  /// Attempt that wrote this row; only the scan's current run is ever read.
+  runId            String? @map("run_id") @db.Uuid
   scan             Scan    @relation(fields: [scanId], references: [id], onDelete: Cascade)
 
-  @@index([scanId, id])
+  @@index([scanId, runId, id])
   @@map("vulnerabilities")
 }

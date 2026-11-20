@@ -1,9 +1,16 @@
 import {
+  Prisma,
   type PrismaClient,
   type Scan as ScanRow,
   type ScanStatus as ScanStatusRow,
 } from '@prisma/client';
-import { RepoUrl, Scan, ScanStatus, type ScanRepository } from '@code-guardian/core';
+import {
+  ConcurrentScanUpdateError,
+  RepoUrl,
+  Scan,
+  ScanStatus,
+  type ScanRepository,
+} from '@code-guardian/core';
 import { isUuid } from './prisma-client';
 
 const STATUS_FROM_ROW: Readonly<Record<ScanStatusRow, ScanStatus>> = {
@@ -20,7 +27,11 @@ const STATUS_TO_ROW: Readonly<Record<ScanStatus, ScanStatusRow>> = {
   Failed: 'Failed',
 };
 
-/** Persists the Scan aggregate as one row; the aggregate's snapshot is the only contract. */
+/**
+ * Persists the Scan aggregate as one row; the aggregate's snapshot is the only contract.
+ * Writes are version-checked (optimistic concurrency): an update only applies when the
+ * stored version still equals the one the aggregate was loaded with.
+ */
 export class PrismaScanRepository implements ScanRepository {
   constructor(private readonly prisma: PrismaClient) {}
 
@@ -35,12 +46,38 @@ export class PrismaScanRepository implements ScanRepository {
       updatedAt: snapshot.updatedAt,
       startedAt: snapshot.startedAt,
       finishedAt: snapshot.finishedAt,
+      runId: snapshot.runId,
     };
-    await this.prisma.scan.upsert({
-      where: { id: snapshot.id },
-      create: { id: snapshot.id, ...data },
-      update: data,
+
+    if (snapshot.version === 0) {
+      try {
+        await this.prisma.scan.create({ data: { id: snapshot.id, ...data, version: 1 } });
+      } catch (error: unknown) {
+        if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
+          throw new ConcurrentScanUpdateError(snapshot.id);
+        }
+        throw error;
+      }
+      scan.markPersisted(1);
+      return;
+    }
+
+    const next = snapshot.version + 1;
+    const { count } = await this.prisma.scan.updateMany({
+      where: { id: snapshot.id, version: snapshot.version },
+      data: { ...data, version: next },
     });
+    if (count === 0) throw new ConcurrentScanUpdateError(snapshot.id);
+    scan.markPersisted(next);
+  }
+
+  async findNonTerminalUpdatedBefore(before: Date, limit: number): Promise<Scan[]> {
+    const rows = await this.prisma.scan.findMany({
+      where: { status: { in: ['Queued', 'Scanning'] }, updatedAt: { lt: before } },
+      orderBy: { updatedAt: 'asc' },
+      take: limit,
+    });
+    return rows.map(toAggregate);
   }
 
   async findById(id: string): Promise<Scan | null> {
@@ -61,5 +98,7 @@ function toAggregate(row: ScanRow): Scan {
     updatedAt: row.updatedAt,
     startedAt: row.startedAt,
     finishedAt: row.finishedAt,
+    runId: row.runId,
+    version: row.version,
   });
 }

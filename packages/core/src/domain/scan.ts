@@ -13,6 +13,16 @@ export interface ScanSnapshot {
   readonly updatedAt: Date;
   readonly startedAt: Date | null;
   readonly finishedAt: Date | null;
+  /**
+   * Identifies the attempt that owns the stored findings. Each start() gets a fresh id,
+   * so findings written by a stale, still-running attempt are never shown.
+   */
+  readonly runId: string | null;
+  /**
+   * Optimistic-concurrency version: 0 = never persisted. Repositories only write when
+   * the stored version still matches, so concurrent writers cannot silently overwrite each other.
+   */
+  readonly version: number;
 }
 
 /**
@@ -38,6 +48,8 @@ export class Scan {
       updatedAt: now,
       startedAt: null,
       finishedAt: null,
+      runId: null,
+      version: 0,
     });
   }
 
@@ -58,15 +70,28 @@ export class Scan {
     return this.state.status;
   }
 
+  get runId(): string | null {
+    return this.state.runId;
+  }
+
+  get version(): number {
+    return this.state.version;
+  }
+
+  get updatedAt(): Date {
+    return this.state.updatedAt;
+  }
+
   get isTerminal(): boolean {
     return TERMINAL_STATUSES.has(this.state.status);
   }
 
-  start(now: Date): void {
+  start(runId: string, now: Date): void {
     this.assertTransition([ScanStatus.Queued, ScanStatus.Scanning], ScanStatus.Scanning);
     this.state = {
       ...this.state,
       status: ScanStatus.Scanning,
+      runId,
       startedAt: this.state.startedAt ?? now,
       updatedAt: now,
     };
@@ -105,6 +130,11 @@ export class Scan {
       finishedAt: now,
       updatedAt: now,
     };
+  }
+
+  /** Called by repositories after a successful write. */
+  markPersisted(version: number): void {
+    this.state = { ...this.state, version };
   }
 
   toSnapshot(): ScanSnapshot {

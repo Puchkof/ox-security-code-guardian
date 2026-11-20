@@ -88,9 +88,10 @@ describe('Scan API (e2e, in-memory adapters)', () => {
       { clone: () => Promise.resolve() },
       { scan: () => Promise.resolve() },
       parser,
+      new SequentialIdGenerator('run'),
       clock,
       new SilentLogger(),
-      { cloneTimeoutMs: 1000, scanTimeoutMs: 1000, batchSize: 2 },
+      { cloneTimeoutMs: 1000, scanTimeoutMs: 1000, parseTimeoutMs: 1000, batchSize: 2 },
     );
     await handler.execute(new ExecuteScanCommand(scanId, 1, 1));
   }

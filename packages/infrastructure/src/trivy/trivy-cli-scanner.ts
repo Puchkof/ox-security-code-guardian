@@ -37,6 +37,7 @@ const NO_SPACE = /no space left on device|ENOSPC/i;
 export class ScannerUnavailableError extends ScanFailure {
   readonly code = 'SCANNER_UNAVAILABLE';
   readonly retryable = false;
+  readonly publicMessage = 'The security scanner is not available';
 }
 
 /**

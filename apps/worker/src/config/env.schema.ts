@@ -13,6 +13,12 @@ export const workerEnvSchema = z.object({
   WORKER_CONCURRENCY: positiveInt.max(16).default(1),
   CLONE_TIMEOUT_MS: positiveInt.default(120_000),
   SCAN_TIMEOUT_MS: positiveInt.default(600_000),
+  /** Deadline for streaming the report into the database. */
+  PARSE_TIMEOUT_MS: positiveInt.default(600_000),
+  /** How often the reaper reconciles non-terminal scans with the queue. */
+  REAPER_INTERVAL_MS: positiveInt.default(60_000),
+  /** A Queued scan with no live job is failed after this long. */
+  QUEUED_GRACE_MS: positiveInt.default(300_000),
   /** Findings buffered in memory before each database flush. */
   BATCH_SIZE: positiveInt.max(10_000).default(500),
   SCAN_WORK_DIR: z.string().min(1).default(join(tmpdir(), 'code-guardian')),

@@ -99,6 +99,8 @@ services:
       SCAN_WORK_DIR: /scans
       MIN_FREE_BYTES: '524288000'
     volumes: [scans:/scans]
+    # Shutdown waits this long for the active scan. A scan cut off here is redelivered by BullMQ
+    # (stalled-job recovery); raise it towards CLONE+SCAN+PARSE timeouts to always finish in place.
     stop_grace_period: 2m
     depends_on:
       migrate: { condition: service_completed_successfully }

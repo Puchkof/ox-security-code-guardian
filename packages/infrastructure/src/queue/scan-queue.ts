@@ -1,5 +1,5 @@
 import { Queue, type ConnectionOptions, type DefaultJobOptions } from 'bullmq';
-import { type ScanJob, type ScanJobQueue } from '@code-guardian/core';
+import { type ScanJob, type ScanJobQueue, type ScanJobState } from '@code-guardian/core';
 
 /** Queue shared by the API (producer) and the worker (consumer). */
 export const SCAN_QUEUE = 'scans';
@@ -81,6 +81,25 @@ export class BullMqScanJobQueue implements ScanJobQueue {
       ]);
     } finally {
       clearTimeout(timer);
+    }
+  }
+
+  async getJobState(scanId: string): Promise<ScanJobState> {
+    const job = await this.queue.getJob(scanId);
+    if (!job) return 'missing';
+    const state = await job.getState();
+    switch (state) {
+      case 'active':
+      case 'completed':
+      case 'failed':
+        return state;
+      case 'waiting':
+      case 'waiting-children':
+      case 'delayed':
+      case 'prioritized':
+        return 'pending';
+      default:
+        return 'missing';
     }
   }
 }

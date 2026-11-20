@@ -1,6 +1,8 @@
 import {
   CloneFailedError,
   ExecuteScanCommand,
+  FailScanCommand,
+  ScanOwnershipLostError,
   InvalidScanTransitionError,
   ReportParseFailedError,
   ScanNotFoundError,
@@ -11,10 +13,10 @@ import { WorkerHost } from '@nestjs/bullmq';
 import { CommandHandler, CqrsModule } from '@nestjs/cqrs';
 import { Test } from '@nestjs/testing';
 import { UnrecoverableError, type Job, type Worker } from 'bullmq';
-import { SilentLogger } from '@code-guardian/core/testing';
+import { RecordingScanJobQueue, SilentLogger } from '@code-guardian/core/testing';
 import { WORKER_CONCURRENCY } from '../src/scan/scan-queue';
-import { LOGGER } from '@code-guardian/nest-common';
-import { ScanProcessor } from '../src/scan/scan.processor';
+import { LOGGER, SCAN_JOB_QUEUE } from '@code-guardian/nest-common';
+import { STALLED_REASON, ScanProcessor } from '../src/scan/scan.processor';
 
 /** Stands in for the core ExecuteScanHandler behind the real CommandBus. */
 @CommandHandler(ExecuteScanCommand)
@@ -30,6 +32,16 @@ class FakeExecuteScanHandler {
   }
 }
 
+@CommandHandler(FailScanCommand)
+class FakeFailScanHandler {
+  received: FailScanCommand[] = [];
+
+  execute(command: FailScanCommand): Promise<string> {
+    this.received.push(command);
+    return Promise.resolve('failed');
+  }
+}
+
 function job(data: unknown, attemptsMade = 0, attempts: number | null = 3): Job {
   const opts = attempts === null ? {} : { attempts };
   return { id: 'job-1', data, attemptsMade, opts } as unknown as Job;
@@ -38,6 +50,8 @@ function job(data: unknown, attemptsMade = 0, attempts: number | null = 3): Job 
 describe('ScanProcessor', () => {
   let processor: ScanProcessor;
   let handler: FakeExecuteScanHandler;
+  let failScan: FakeFailScanHandler;
+  let jobs: RecordingScanJobQueue;
   let worker: Pick<Worker, 'concurrency'>;
 
   beforeEach(async () => {
@@ -50,6 +64,8 @@ describe('ScanProcessor', () => {
       providers: [
         ScanProcessor,
         FakeExecuteScanHandler,
+        FakeFailScanHandler,
+        { provide: SCAN_JOB_QUEUE, useValue: (jobs = new RecordingScanJobQueue()) },
         { provide: WORKER_CONCURRENCY, useValue: 4 },
         { provide: LOGGER, useValue: new SilentLogger() },
       ],
@@ -57,6 +73,7 @@ describe('ScanProcessor', () => {
     await moduleRef.init();
     processor = moduleRef.get(ScanProcessor);
     handler = moduleRef.get(FakeExecuteScanHandler);
+    failScan = moduleRef.get(FakeFailScanHandler);
   });
 
   afterEach(() => {
@@ -116,5 +133,49 @@ describe('ScanProcessor', () => {
     expect(thrown).toBeInstanceOf(UnrecoverableError);
     expect((thrown as Error).message).toContain(error.code);
     expect((thrown as Error).cause).toBe(error);
+  });
+
+  describe('when BullMQ gives up on a job', () => {
+    it('fails the scan with a client-safe reason after the last attempt', async () => {
+      await processor.onFailed(
+        job({ scanId: 'scan-1' }, 3, 3),
+        new CloneFailedError('git: could not resolve host', true),
+      );
+      expect(failScan.received).toEqual([
+        new FailScanCommand('scan-1', 'Could not clone the repository (network or Git error)'),
+      ]);
+    });
+
+    it('uses the stalled reason when BullMQ failed the job for stalling too often', async () => {
+      await processor.onFailed(
+        job({ scanId: 'scan-1' }, 1, 3),
+        new Error('job stalled more than allowable limit'),
+      );
+      expect(failScan.received).toEqual([new FailScanCommand('scan-1', STALLED_REASON)]);
+    });
+
+    it('does nothing while retries remain', async () => {
+      await processor.onFailed(job({ scanId: 'scan-1' }, 1, 3), new Error('flaky'));
+      expect(failScan.received).toHaveLength(0);
+    });
+
+    it('never fails a scan that a newer attempt took over', async () => {
+      const lost = new UnrecoverableError('SCAN_OWNERSHIP_LOST');
+      lost.cause = new ScanOwnershipLostError('scan-1');
+      await processor.onFailed(job({ scanId: 'scan-1' }, 1, 3), lost);
+      expect(failScan.received).toHaveLength(0);
+    });
+
+    it('fails the scan when a stalled job was moved to failed (max stalls exceeded)', async () => {
+      jobs.states.set('scan-9', 'failed');
+      await processor.onStalled('scan-9');
+      expect(failScan.received).toEqual([new FailScanCommand('scan-9', STALLED_REASON)]);
+    });
+
+    it('leaves a stalled job alone when BullMQ re-queued it', async () => {
+      jobs.states.set('scan-9', 'pending');
+      await processor.onStalled('scan-9');
+      expect(failScan.received).toHaveLength(0);
+    });
   });
 });

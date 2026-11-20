@@ -16,7 +16,7 @@ describe('Scan state machine', () => {
 
   it('runs the happy path Queued → Scanning → Finished', () => {
     const scan = Scan.queue('s1', repo, t0);
-    scan.start(t0);
+    scan.start('run-1', t0);
     scan.finish(3, t1);
     expect(scan.toSnapshot()).toMatchObject({
       status: ScanStatus.Finished,
@@ -30,19 +30,19 @@ describe('Scan state machine', () => {
 
   it('can requeue after a transient failure and keeps the reason', () => {
     const scan = Scan.queue('s1', repo, t0);
-    scan.start(t0);
+    scan.start('run-1', t0);
     scan.requeue('network', t1);
     expect(scan.status).toBe(ScanStatus.Queued);
     expect(scan.toSnapshot().failureReason).toBe('network');
-    scan.start(t1);
+    scan.start('run-1', t1);
     expect(scan.toSnapshot().startedAt).toEqual(t0);
   });
 
   it('allows a stalled Scanning job to be started again', () => {
     const scan = Scan.queue('s1', repo, t0);
-    scan.start(t0);
+    scan.start('run-1', t0);
     expect(() => {
-      scan.start(t1);
+      scan.start('run-1', t1);
     }).not.toThrow();
   });
 
@@ -52,7 +52,7 @@ describe('Scan state machine', () => {
     expect(queued.status).toBe(ScanStatus.Failed);
 
     const scanning = Scan.queue('s2', repo, t0);
-    scanning.start(t0);
+    scanning.start('run-1', t0);
     scanning.fail('trivy', t1);
     expect(scanning.toSnapshot()).toMatchObject({
       status: ScanStatus.Failed,
@@ -81,10 +81,10 @@ describe('Scan state machine', () => {
 
   it('treats Finished and Failed as terminal', () => {
     const finished = Scan.queue('s1', repo, t0);
-    finished.start(t0);
+    finished.start('run-1', t0);
     finished.finish(0, t1);
     expect(() => {
-      finished.start(t1);
+      finished.start('run-1', t1);
     }).toThrow(InvalidScanTransitionError);
     expect(() => {
       finished.fail('x', t1);

@@ -83,8 +83,20 @@ Queued ──start──▶ Scanning ──finish──▶ Finished
   └────requeue───────┘   (transient error, retry pending; failureReason shows the last error)
 ```
 
-Transitions are enforced by the [`Scan`](packages/core/src/domain/scan.ts) aggregate. A retry clears any
-partially stored findings first, and a duplicate job delivery for a finished scan is a no-op.
+Transitions are enforced by the [`Scan`](packages/core/src/domain/scan.ts) aggregate. Two more rules keep
+concurrent attempts safe:
+
+- **Optimistic concurrency:** every write is `UPDATE … WHERE id = ? AND version = ?`. If a newer attempt
+  takes over (a stalled job redelivered while the old worker is still alive), the old attempt's next write is
+  rejected and it stops without touching the scan.
+- **Run ids:** each attempt writes its findings under a fresh `run_id`, and readers only see the run
+  recorded on the scan. A half-finished or superseded attempt can never mix its rows into the result.
+
+No scan stays `Queued`/`Scanning` forever. When BullMQ gives up on a job (last attempt, or stalled more
+than `maxStalledCount` after repeated worker crashes), the worker marks the scan `Failed`. A periodic
+**reaper** ([`ReapStuckScansHandler`](packages/core/src/application/commands/reap-stuck-scans/reap-stuck-scans.handler.ts))
+also compares the database with the queue. It fails `Scanning` scans past the sum of all timeouts, and
+`Queued` scans whose job no longer exists.
 
 ## Memory: how the 500MB+ report is handled
 
@@ -104,14 +116,16 @@ fs.createReadStream(16KB chunks) → stream-json tokenizer → Ignore(Descriptio
 
 ### Measured
 
-| Test                                                                                        | Limit                      | Result                                          |
-| ------------------------------------------------------------------------------------------- | -------------------------- | ----------------------------------------------- |
-| Parser only, 583MB report (335k findings)                                                   | `--max-old-space-size=150` | ✅ 36MB peak heap, 77MB RSS, ~51MB/s            |
-| Parser only, **2GB** report (1.18M findings)                                                | `--max-old-space-size=150` | ✅ 40MB peak heap, 78MB RSS: flat as size grows |
-| Naive `JSON.parse(readFile)` on 583MB                                                       | `--max-old-space-size=150` | ❌ heap OOM within 100ms                        |
-| **Full worker in Docker** (clone + 583MB report + 6,700 inserts)                            | `mem_limit: 200m`          | ✅ 90MiB container peak, no OOM kill, 33s       |
-| **`node --max-old-space-size=150 dist/index.js`** (API + worker, one process, 583MB report) | heap 150MB                 | ✅ Finished, 6,700 criticals                    |
-| Real scan of NodeGoat in Docker                                                             | `mem_limit: 200m`          | ✅ 12 criticals, worker peak 59MiB              |
+| Test                                                                                        | Limit                      | Result                                           |
+| ------------------------------------------------------------------------------------------- | -------------------------- | ------------------------------------------------ |
+| Parser only, 583MB report (335k findings)                                                   | `--max-old-space-size=150` | ✅ 36MB peak heap, 77MB RSS, ~51MB/s             |
+| Parser only, **2GB** report (1.18M findings)                                                | `--max-old-space-size=150` | ✅ 40MB peak heap, 78MB RSS: flat as size grows  |
+| Naive `JSON.parse(readFile)` on 583MB                                                       | `--max-old-space-size=150` | ❌ heap OOM within 100ms                         |
+| **Full worker in Docker** (clone + 583MB report + 6,700 inserts)                            | `mem_limit: 200m`          | ✅ 90MiB container peak, no OOM kill, 33s        |
+| **`node --max-old-space-size=150 dist/index.js`** (API + worker, one process, 583MB report) | heap 150MB                 | ✅ Finished, 6,700 criticals                     |
+| Real scan of NodeGoat in Docker                                                             | `mem_limit: 200m`          | ✅ 12 criticals, worker peak 59MiB               |
+| Worker SIGKILLed once mid-scan (583MB drill)                                                | `mem_limit: 200m`          | ✅ job redelivered, Finished, exactly 6,700 rows |
+| Worker SIGKILLed during two consecutive attempts                                            | `mem_limit: 200m`          | ✅ `Failed`: "Scan was interrupted repeatedly"   |
 
 Details and the chunk-size finding (64KB chunks peaked at 97MB of heap, 16KB chunks at 36MB) are in
 [docs/benchmarks.md](docs/benchmarks.md).
@@ -194,22 +208,22 @@ query {
 
 ## Error handling
 
-| Situation                                                                                                    | Behaviour                                                                                                                                |
-| ------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------- |
-| URL is not `https://github.com/<owner>/<repo>` (ssh, file://, credentials, query strings, option-like names) | `400 INVALID_REPO_URL`, never enqueued. Strict validation also prevents `git` argument injection.                                        |
-| Redis down when queueing                                                                                     | Enqueue times out after 5s, scan marked `Failed`, `503 QUEUE_UNAVAILABLE`                                                                |
-| Repo missing or private                                                                                      | `git` stderr classified as permanent → `Failed` at once (BullMQ `UnrecoverableError`, no wasted retries)                                 |
-| Network flake on clone or Trivy DB                                                                           | Retryable → status back to `Queued` with the reason; 3 attempts, exponential backoff                                                     |
-| Trivy exits non-zero, or exits 0 without writing a report                                                    | `ScannerFailedError` with the last 8KB of stderr; retried                                                                                |
-| Trivy not installed                                                                                          | Non-retryable `SCANNER_UNAVAILABLE`                                                                                                      |
-| Clone or scan exceeds its timeout                                                                            | Child process **group** gets SIGTERM, then SIGKILL; `SCAN_TIMEOUT`                                                                       |
-| **Disk full**                                                                                                | `statfs` free-space check before each scan (`MIN_FREE_BYTES`) and `ENOSPC` mapping at every step → `INSUFFICIENT_STORAGE`, retried later |
-| Corrupt or truncated report                                                                                  | `REPORT_PARSE_FAILED`; partially stored findings are deleted                                                                             |
-| Malformed individual findings                                                                                | Skipped and counted in a log warning; the scan still succeeds                                                                            |
-| Worker crash or OOM kill mid-scan                                                                            | BullMQ stalled-job recovery re-runs the job (idempotent); orphaned workspaces are swept at startup                                       |
-| Any failure                                                                                                  | Workspace (repo + report) is removed in `finally`                                                                                        |
-| Shutdown (SIGTERM)                                                                                           | Worker stops taking jobs and finishes the active one, then the API closes                                                                |
-| Unknown id / bad cursor                                                                                      | `404 SCAN_NOT_FOUND` / `400 INVALID_CURSOR`; internals never leak (generic 500)                                                          |
+| Situation                                                                                                    | Behaviour                                                                                                                                                                                                                                                            |
+| ------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| URL is not `https://github.com/<owner>/<repo>` (ssh, file://, credentials, query strings, option-like names) | `400 INVALID_REPO_URL`, never enqueued. Strict validation also prevents `git` argument injection.                                                                                                                                                                    |
+| Redis down when queueing                                                                                     | Enqueue times out after 5s, scan marked `Failed`, `503 QUEUE_UNAVAILABLE`                                                                                                                                                                                            |
+| Repo missing or private                                                                                      | `git` stderr classified as permanent → `Failed` at once (BullMQ `UnrecoverableError`, no wasted retries)                                                                                                                                                             |
+| Network flake on clone or Trivy DB                                                                           | Retryable → status back to `Queued` with the reason; 3 attempts, exponential backoff                                                                                                                                                                                 |
+| Trivy exits non-zero, or exits 0 without writing a report                                                    | Retried; the last 8KB of stderr goes to logs only                                                                                                                                                                                                                    |
+| Trivy not installed                                                                                          | Non-retryable `SCANNER_UNAVAILABLE`                                                                                                                                                                                                                                  |
+| Clone or scan exceeds its timeout                                                                            | Child process **group** gets SIGTERM, then SIGKILL; `SCAN_TIMEOUT`                                                                                                                                                                                                   |
+| **Disk full**                                                                                                | `statfs` free-space check before each scan (`MIN_FREE_BYTES`) and `ENOSPC` mapping at every step → `INSUFFICIENT_STORAGE`, retried later                                                                                                                             |
+| Corrupt or truncated report                                                                                  | `REPORT_PARSE_FAILED`; partially stored findings are deleted                                                                                                                                                                                                         |
+| Malformed individual findings                                                                                | Skipped and counted in a log warning; the scan still succeeds                                                                                                                                                                                                        |
+| Worker crash or OOM kill mid-scan                                                                            | BullMQ redelivers the stalled job; the new attempt takes over under a fresh run id (version-checked writes stop the old one). After `maxStalledCount` is exceeded the scan is marked `Failed`; the reaper is the backstop. Orphaned workspaces are swept at startup. |
+| Any failure                                                                                                  | `failureReason` is a fixed public message per error code (no stderr, paths or hostnames); details are logged. The workspace (repo + report) is removed in `finally`.                                                                                                 |
+| Shutdown (SIGTERM)                                                                                           | Worker stops taking jobs and waits for the active scan up to `stop_grace_period` (2m), then the API closes. A scan cut off by the deadline is redelivered like any stalled job.                                                                                      |
+| Unknown id / bad cursor                                                                                      | `404 SCAN_NOT_FOUND` / `400 INVALID_CURSOR`; unexpected errors become a generic 500                                                                                                                                                                                  |
 
 ## Testing
 
@@ -235,9 +249,10 @@ pnpm -C apps/web test
   stream filtering. In production, also passing `--severity CRITICAL` would shrink the report at the source.
 - **One backend image, two roles:** `APP_MODE` picks `api`, `worker` or `all`. The same build backs Compose
   and the single-process self-test.
-- **Known gap:** saving a scan and enqueueing it are two steps. If Redis fails in between, the scan is marked
-  `Failed` (and the client gets 503), but a crash at exactly that moment would leave a `Queued` row with no
-  job. The production fix is a transactional outbox.
+- **Save and enqueue are two steps.** If Redis fails, the scan is marked `Failed` and the client gets 503.
+  An enqueue that timed out but landed is detected by the version check, and the client gets 202. A crash
+  between the two steps leaves a `Queued` row with no job, which the reaper fails after `QUEUED_GRACE_MS`.
+  A transactional outbox would remove the gap entirely.
 
 ## What's next
 

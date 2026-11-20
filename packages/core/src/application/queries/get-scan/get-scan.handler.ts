@@ -24,8 +24,8 @@ export class GetScanHandler {
 
     let criticalVulnerabilities: ScanView['criticalVulnerabilities'] = null;
     let nextCursor: string | null = null;
-    if (snapshot.status === ScanStatus.Finished) {
-      const page = await this.vulnerabilities.findByScan(snapshot.id, {
+    if (snapshot.status === ScanStatus.Finished && snapshot.runId !== null) {
+      const page = await this.vulnerabilities.findByScan(snapshot.id, snapshot.runId, {
         limit: clampLimit(query.limit),
         cursor: query.cursor ?? null,
       });

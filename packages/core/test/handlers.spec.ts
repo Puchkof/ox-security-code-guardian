@@ -14,6 +14,13 @@ import {
   Severity,
   StartScanCommand,
   StartScanHandler,
+  FailScanCommand,
+  FailScanHandler,
+  REAPED_REASON,
+  ReapStuckScansCommand,
+  ReapStuckScansHandler,
+  ScanOwnershipLostError,
+  UnexpectedScanError,
   type RepositoryCloner,
   type ReportParseOptions,
   type ReportParser,
@@ -119,12 +126,32 @@ function setup() {
     cloner,
     scanner,
     parser,
+    new SequentialIdGenerator('run'),
     clock,
     logger,
-    { cloneTimeoutMs: 1_000, scanTimeoutMs: 1_000, batchSize: 2 },
+    { cloneTimeoutMs: 1_000, scanTimeoutMs: 1_000, parseTimeoutMs: 1_000, batchSize: 2 },
   );
   const get = new GetScanHandler(scans, vulns);
-  return { scans, vulns, queue, workspaces, cloner, scanner, parser, start, execute, get };
+  const fail = new FailScanHandler(scans, vulns, clock, logger);
+  const reap = new ReapStuckScansHandler(scans, queue, fail, clock, logger, {
+    queuedGraceMs: 60_000,
+    scanningDeadlineMs: 600_000,
+  });
+  return {
+    scans,
+    vulns,
+    queue,
+    clock,
+    workspaces,
+    cloner,
+    scanner,
+    parser,
+    start,
+    execute,
+    get,
+    fail,
+    reap,
+  };
 }
 
 describe('StartScanHandler', () => {
@@ -194,7 +221,7 @@ describe('ExecuteScanHandler', () => {
 
     const view = await ctx.get.execute(new GetScanQuery(id));
     expect(view.status).toBe(ScanStatus.Queued);
-    expect(view.failureReason).toBe('trivy exited with 1');
+    expect(view.failureReason).toBe('The security scanner failed');
     expect(ctx.workspaces.disposed).toBe(1);
   });
 
@@ -215,7 +242,7 @@ describe('ExecuteScanHandler', () => {
     );
     const view = await ctx.get.execute(new GetScanQuery(id));
     expect(view.status).toBe(ScanStatus.Failed);
-    expect(view.failureReason).toBe('Repository not found');
+    expect(view.failureReason).toBe('Repository was not found or is not public');
   });
 
   it('drops partially stored findings when parsing fails midway', async () => {
@@ -251,14 +278,87 @@ describe('ExecuteScanHandler', () => {
     expect((await ctx.get.execute(new GetScanQuery(id))).status).toBe(ScanStatus.Failed);
   });
 
-  it('clears results of an interrupted earlier attempt before re-running', async () => {
+  it('never shows findings of an interrupted earlier attempt and cleans them up', async () => {
     const ctx = setup();
     const id = await queued(ctx);
-    await ctx.vulns.appendBatch(id, [vuln('STALE-1')]);
+    await ctx.vulns.appendBatch(id, 'old-run', [vuln('STALE-1')]);
     ctx.parser.findings = [vuln('CVE-1')];
     await ctx.execute.execute(new ExecuteScanCommand(id, 2, 3));
     const view = await ctx.get.execute(new GetScanQuery(id));
     expect(view.criticalVulnerabilities?.map((v) => v.vulnerabilityId)).toEqual(['CVE-1']);
+    expect(ctx.vulns.countFor(id)).toBe(1);
+  });
+
+  it('stores a client-safe failure reason, never raw scanner output', async () => {
+    const ctx = setup();
+    const id = await queued(ctx);
+    ctx.scanner.failWith = new ScannerFailedError(
+      'Trivy exited with code 1: FATAL /scans/scan-abc/repo: dial tcp trivy-server:4954',
+      1,
+      'stderr…',
+    );
+    await expect(ctx.execute.execute(new ExecuteScanCommand(id, 1, 1))).rejects.toThrow();
+    const view = await ctx.get.execute(new GetScanQuery(id));
+    expect(view.failureReason).toBe('The security scanner failed');
+  });
+
+  it('passes a deadline to the parser', async () => {
+    const ctx = setup();
+    const id = await queued(ctx);
+    const seen: (AbortSignal | undefined)[] = [];
+    const original = ctx.parser.stream.bind(ctx.parser);
+    ctx.parser.stream = (file, options) => {
+      seen.push(options.signal);
+      return original(file, options);
+    };
+    await ctx.execute.execute(new ExecuteScanCommand(id, 1, 1));
+    expect(seen[0]).toBeInstanceOf(AbortSignal);
+  });
+
+  it('keeps the original failure when recording it fails (database outage)', async () => {
+    const ctx = setup();
+    const id = await queued(ctx);
+    ctx.cloner.failWith = new CloneFailedError('Repository not found', false);
+    // The start save succeeds; the failure-path save then fails.
+    const save = ctx.scans.save.bind(ctx.scans);
+    let calls = 0;
+    ctx.scans.save = (scan) => {
+      calls += 1;
+      return calls === 2 ? Promise.reject(new Error('database unavailable')) : save(scan);
+    };
+    await expect(ctx.execute.execute(new ExecuteScanCommand(id, 1, 1))).rejects.toBeInstanceOf(
+      CloneFailedError,
+    );
+    expect(ctx.workspaces.disposed).toBe(1);
+  });
+
+  it('records a failure when the very first save fails', async () => {
+    const ctx = setup();
+    const id = await queued(ctx);
+    ctx.scans.failNextSaves = 1;
+    await expect(ctx.execute.execute(new ExecuteScanCommand(id, 1, 1))).rejects.toBeInstanceOf(
+      UnexpectedScanError,
+    );
+    expect((await ctx.get.execute(new GetScanQuery(id))).status).toBe(ScanStatus.Failed);
+  });
+
+  it('stops without touching the scan when a newer attempt took over', async () => {
+    const ctx = setup();
+    const id = await queued(ctx);
+    // Simulate a redelivered attempt that starts while this one is scanning.
+    ctx.scanner.scan = async () => {
+      const other = await ctx.scans.findById(id);
+      other!.start('other-run', new Date());
+      await ctx.scans.save(other!);
+    };
+    ctx.parser.findings = [vuln('CVE-1')];
+
+    await expect(ctx.execute.execute(new ExecuteScanCommand(id, 1, 3))).rejects.toBeInstanceOf(
+      ScanOwnershipLostError,
+    );
+    const view = await ctx.get.execute(new GetScanQuery(id));
+    expect(view.status).toBe(ScanStatus.Scanning);
+    expect(ctx.workspaces.disposed).toBe(1);
   });
 
   it('skips scans that already reached a terminal state (duplicate delivery)', async () => {
@@ -298,5 +398,104 @@ describe('GetScanHandler', () => {
   it('throws ScanNotFoundError for unknown ids', async () => {
     const { get } = setup();
     await expect(get.execute(new GetScanQuery('missing'))).rejects.toThrow(ScanNotFoundError);
+  });
+});
+
+describe('StartScanHandler under races', () => {
+  it('reports success when enqueue timed out but a worker already owns the scan', async () => {
+    const ctx = setup();
+    ctx.queue.enqueue = async (job) => {
+      // The add landed and a worker started before the timeout surfaced.
+      const scan = await ctx.scans.findById(job.scanId);
+      scan!.start('run-x', new Date());
+      await ctx.scans.save(scan!);
+      throw new Error('Enqueue did not complete within 5000ms');
+    };
+    const result = await ctx.start.execute(new StartScanCommand(REPO));
+    expect(result.status).toBe('Queued');
+    expect((await ctx.get.execute(new GetScanQuery(result.scanId))).status).toBe(
+      ScanStatus.Scanning,
+    );
+  });
+});
+
+describe('FailScanHandler', () => {
+  it('fails a non-terminal scan and is a no-op afterwards', async () => {
+    const ctx = setup();
+    const { scanId } = await ctx.start.execute(new StartScanCommand(REPO));
+    expect(await ctx.fail.execute(new FailScanCommand(scanId, 'Job stalled'))).toBe('failed');
+    expect(await ctx.fail.execute(new FailScanCommand(scanId, 'again'))).toBe('already-terminal');
+    const view = await ctx.get.execute(new GetScanQuery(scanId));
+    expect(view).toMatchObject({ status: ScanStatus.Failed, failureReason: 'Job stalled' });
+  });
+
+  it('does not override a finished scan', async () => {
+    const ctx = setup();
+    const { scanId } = await ctx.start.execute(new StartScanCommand(REPO));
+    await ctx.execute.execute(new ExecuteScanCommand(scanId, 1, 1));
+    expect(await ctx.fail.execute(new FailScanCommand(scanId, 'late'))).toBe('already-terminal');
+    expect((await ctx.get.execute(new GetScanQuery(scanId))).status).toBe(ScanStatus.Finished);
+  });
+
+  it('returns not-found for unknown scans', async () => {
+    const ctx = setup();
+    expect(await ctx.fail.execute(new FailScanCommand('nope', 'x'))).toBe('not-found');
+  });
+});
+
+describe('ReapStuckScansHandler', () => {
+  async function scanningScan(ctx: ReturnType<typeof setup>): Promise<string> {
+    const { scanId } = await ctx.start.execute(new StartScanCommand(REPO));
+    const scan = await ctx.scans.findById(scanId);
+    scan!.start('run-1', ctx.clock.now());
+    await ctx.scans.save(scan!);
+    return scanId;
+  }
+
+  it('fails a Scanning scan whose job BullMQ already failed (stalled too often)', async () => {
+    const ctx = setup();
+    const id = await scanningScan(ctx);
+    ctx.queue.states.set(id, 'failed');
+    ctx.clock.advance(61_000);
+    expect(await ctx.reap.execute(new ReapStuckScansCommand())).toEqual({
+      inspected: 1,
+      failed: 1,
+    });
+    expect((await ctx.get.execute(new GetScanQuery(id))).failureReason).toBe(REAPED_REASON);
+  });
+
+  it('leaves a Scanning scan alone while its attempt may still be within its timeouts', async () => {
+    const ctx = setup();
+    const id = await scanningScan(ctx);
+    ctx.queue.states.set(id, 'active');
+    ctx.clock.advance(120_000);
+    await ctx.reap.execute(new ReapStuckScansCommand());
+    expect((await ctx.get.execute(new GetScanQuery(id))).status).toBe(ScanStatus.Scanning);
+  });
+
+  it('fails a Scanning scan past the hard deadline even if the job looks active', async () => {
+    const ctx = setup();
+    const id = await scanningScan(ctx);
+    ctx.queue.states.set(id, 'active');
+    ctx.clock.advance(600_001);
+    await ctx.reap.execute(new ReapStuckScansCommand());
+    expect((await ctx.get.execute(new GetScanQuery(id))).status).toBe(ScanStatus.Failed);
+  });
+
+  it('fails a Queued scan that has no job (crash between save and enqueue)', async () => {
+    const ctx = setup();
+    const { scanId } = await ctx.start.execute(new StartScanCommand(REPO));
+    ctx.queue.states.set(scanId, 'missing');
+    ctx.clock.advance(61_000);
+    await ctx.reap.execute(new ReapStuckScansCommand());
+    expect((await ctx.get.execute(new GetScanQuery(scanId))).status).toBe(ScanStatus.Failed);
+  });
+
+  it('keeps old Queued scans whose job is still waiting (backlog)', async () => {
+    const ctx = setup();
+    const { scanId } = await ctx.start.execute(new StartScanCommand(REPO));
+    ctx.clock.advance(3_600_000);
+    await ctx.reap.execute(new ReapStuckScansCommand());
+    expect((await ctx.get.execute(new GetScanQuery(scanId))).status).toBe(ScanStatus.Queued);
   });
 });
