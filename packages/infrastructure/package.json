@@ -7,9 +7,26 @@
   "types": "dist/index.d.ts",
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
-    "typecheck": "tsc -p tsconfig.json --noEmit"
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "postinstall": "prisma generate",
+    "prisma:generate": "prisma generate",
+    "prisma:migrate:deploy": "prisma migrate deploy",
+    "prisma:migrate:dev": "prisma migrate dev"
   },
   "dependencies": {
-    "@code-guardian/core": "workspace:*"
-  }
+    "@code-guardian/core": "workspace:*",
+    "@prisma/client": "6.19.3",
+    "bullmq": "^6.7.8",
+    "ioredis": "^6.0.0"
+  },
+  "devDependencies": {
+    "@testcontainers/postgresql": "^12.2.2",
+    "@testcontainers/redis": "^12.2.2",
+    "prisma": "6.19.3",
+    "testcontainers": "^12.2.2"
+  },
+  "files": [
+    "dist",
+    "prisma"
+  ]
 }
