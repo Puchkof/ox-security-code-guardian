@@ -1,0 +1,10 @@
+node_modules/
+dist/
+coverage/
+*.tsbuildinfo
+.env
+.env.*
+!.env.example
+# Large generated Trivy fixtures used by the OOM benchmark
+fixtures/generated/
+.DS_Store
