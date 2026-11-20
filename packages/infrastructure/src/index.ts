@@ -1,3 +1,12 @@
-// Adapters are exported here as they are added; one export line per adapter module.
+export * from './fs/tmp-workspace-provider';
+export * from './git/git-cli-cloner';
+export * from './persistence/prisma-client';
+export * from './persistence/prisma-scan.repository';
+export * from './persistence/prisma-vulnerability.repository';
+export * from './process/run-process';
+export * from './queue/scan-queue';
+export * from './system/system-clock';
+export * from './system/uuid-id-generator';
 export * from './trivy/streaming-trivy-report-parser';
+export * from './trivy/trivy-cli-scanner';
 export * from './trivy/trivy-report.types';

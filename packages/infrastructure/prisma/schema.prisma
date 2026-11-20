@@ -1,0 +1,53 @@
+// Persistence model for Code Guardian.
+// Only CRITICAL findings are ever stored, so Vulnerability stays small per scan.
+
+generator client {
+  provider      = "prisma-client-js"
+  // Linux musl targets keep the generated client usable inside the Alpine runtime images.
+  binaryTargets = ["native", "linux-musl-openssl-3.0.x", "linux-musl-arm64-openssl-3.0.x"]
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum ScanStatus {
+  Queued
+  Scanning
+  Finished
+  Failed
+}
+
+model Scan {
+  id              String          @id @db.Uuid
+  repoUrl         String          @map("repo_url")
+  status          ScanStatus
+  criticalCount   Int?            @map("critical_count")
+  failureReason   String?         @map("failure_reason") @db.Text
+  createdAt       DateTime        @map("created_at") @db.Timestamptz(3)
+  updatedAt       DateTime        @map("updated_at") @db.Timestamptz(3)
+  startedAt       DateTime?       @map("started_at") @db.Timestamptz(3)
+  finishedAt      DateTime?       @map("finished_at") @db.Timestamptz(3)
+  vulnerabilities Vulnerability[]
+
+  @@map("scans")
+}
+
+model Vulnerability {
+  /// Monotonic surrogate key; doubles as the keyset-pagination cursor.
+  id               BigInt  @id @default(autoincrement())
+  scanId           String  @map("scan_id") @db.Uuid
+  vulnerabilityId  String  @map("vulnerability_id")
+  pkgName          String  @map("pkg_name")
+  installedVersion String  @map("installed_version")
+  fixedVersion     String? @map("fixed_version")
+  severity         String
+  title            String? @db.Text
+  primaryUrl       String? @map("primary_url") @db.Text
+  target           String  @db.Text
+  scan             Scan    @relation(fields: [scanId], references: [id], onDelete: Cascade)
+
+  @@index([scanId, id])
+  @@map("vulnerabilities")
+}

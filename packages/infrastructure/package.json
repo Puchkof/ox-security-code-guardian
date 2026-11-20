@@ -8,6 +8,10 @@
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
+    "postinstall": "prisma generate",
+    "prisma:generate": "prisma generate",
+    "prisma:migrate:deploy": "prisma migrate deploy",
+    "prisma:migrate:dev": "prisma migrate dev",
     "build:bench": "tsc -p tsconfig.scripts.json",
     "gen:report": "node dist/bench/scripts/generate-large-report.js",
     "bench:parse": "node --max-old-space-size=150 dist/bench/scripts/parse-benchmark.js",
@@ -15,11 +19,22 @@
   },
   "dependencies": {
     "@code-guardian/core": "workspace:*",
+    "@prisma/client": "6.19.3",
+    "bullmq": "^6.7.8",
+    "ioredis": "^6.0.0",
     "stream-chain": "^2.2.5",
     "stream-json": "^1.9.1"
   },
   "devDependencies": {
+    "@testcontainers/postgresql": "^12.2.2",
+    "@testcontainers/redis": "^12.2.2",
+    "prisma": "6.19.3",
+    "testcontainers": "^12.2.2",
     "@types/stream-chain": "^2.1.0",
     "@types/stream-json": "^1.7.8"
-  }
+  },
+  "files": [
+    "dist",
+    "prisma"
+  ]
 }
