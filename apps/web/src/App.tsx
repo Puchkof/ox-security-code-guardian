@@ -22,7 +22,8 @@ export function App() {
 
   const { scan, error: pollError } = useScanPolling(scanId);
 
-  const running = submitting || (scanId !== null && (scan === null ? !pollError : isActive(scan.status)));
+  const running =
+    submitting || (scanId !== null && (scan === null ? !pollError : isActive(scan.status)));
   const nextCursor = cursor === undefined ? (scan?.nextCursor ?? null) : cursor;
 
   async function onSubmit(e: FormEvent): Promise<void> {
@@ -98,7 +99,8 @@ export function App() {
       {scan && (
         <section aria-live="polite" aria-label="Scan status">
           <p>
-            Status: <span className={`badge badge-${scan.status.toLowerCase()}`}>{scan.status}</span>
+            Status:{' '}
+            <span className={`badge badge-${scan.status.toLowerCase()}`}>{scan.status}</span>
           </p>
           {retryPending && (
             <p className="note">

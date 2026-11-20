@@ -9,7 +9,10 @@ afterEach(() => vi.unstubAllGlobals());
 describe('client', () => {
   it('returns a validated start response', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(json({ scanId: 'a', status: 'Queued' }, 202)));
-    await expect(startScan('https://github.com/x/y')).resolves.toEqual({ scanId: 'a', status: 'Queued' });
+    await expect(startScan('https://github.com/x/y')).resolves.toEqual({
+      scanId: 'a',
+      status: 'Queued',
+    });
   });
 
   it('maps API error bodies to ApiError', async () => {
@@ -17,7 +20,11 @@ describe('client', () => {
       'fetch',
       vi.fn().mockResolvedValue(json({ error: { code: 'INVALID_URL', message: 'Bad URL' } }, 400)),
     );
-    await expect(startScan('x')).rejects.toMatchObject({ status: 400, code: 'INVALID_URL', message: 'Bad URL' });
+    await expect(startScan('x')).rejects.toMatchObject({
+      status: 400,
+      code: 'INVALID_URL',
+      message: 'Bad URL',
+    });
   });
 
   it('handles 404 without an error body', async () => {

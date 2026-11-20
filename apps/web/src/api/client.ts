@@ -58,7 +58,8 @@ export const isScanResult = (v: unknown): v is ScanResult =>
   isStrOrNull(v.startedAt) &&
   isStrOrNull(v.finishedAt) &&
   (v.criticalVulnerabilities === null ||
-    (Array.isArray(v.criticalVulnerabilities) && v.criticalVulnerabilities.every(isVulnerability))) &&
+    (Array.isArray(v.criticalVulnerabilities) &&
+      v.criticalVulnerabilities.every(isVulnerability))) &&
   isStrOrNull(v.nextCursor);
 
 async function request<T>(

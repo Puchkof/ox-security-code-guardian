@@ -55,7 +55,10 @@ describe('useScanPolling', () => {
   it('does not overlap requests when a response is slow', async () => {
     let resolve: (r: Response) => void = () => undefined;
     const fetchMock = vi.fn().mockImplementation(
-      () => new Promise<Response>((r) => { resolve = r; }),
+      () =>
+        new Promise<Response>((r) => {
+          resolve = r;
+        }),
     );
     vi.stubGlobal('fetch', fetchMock);
 
