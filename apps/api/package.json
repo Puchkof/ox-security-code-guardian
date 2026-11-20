@@ -1,0 +1,39 @@
+{
+  "name": "@code-guardian/api",
+  "version": "0.1.0",
+  "private": true,
+  "description": "HTTP + GraphQL delivery adapter: queues scans and serves their results",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "start": "node --max-old-space-size=150 dist/main.js",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@apollo/server": "^5.5.2",
+    "@as-integrations/express5": "^1.1.2",
+    "@code-guardian/core": "workspace:*",
+    "@nestjs/apollo": "^13.4.5",
+    "@nestjs/common": "^11.2.11",
+    "@nestjs/config": "^4.0.4",
+    "@nestjs/core": "^11.2.11",
+    "@nestjs/cqrs": "^11.0.3",
+    "@nestjs/graphql": "^13.4.5",
+    "@nestjs/platform-express": "^11.2.11",
+    "@nestjs/terminus": "^11.1.1",
+    "graphql": "^16.15.0",
+    "nestjs-pino": "^4.6.1",
+    "pino": "^9.14.0",
+    "pino-http": "^10.5.0",
+    "reflect-metadata": "^0.2.2",
+    "rxjs": "^7.8.2",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@nestjs/testing": "^11.2.11",
+    "@types/express": "^5.0.6",
+    "@types/supertest": "^6.0.3",
+    "supertest": "^7.1.4"
+  }
+}
