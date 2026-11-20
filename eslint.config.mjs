@@ -15,14 +15,7 @@ const forbiddenFsImports = ['readFile', 'readFileSync'].map((name) => name);
 
 export default tseslint.config(
   {
-    ignores: [
-      '.claude/**',
-      '**/dist/**',
-      '**/coverage/**',
-      'apps/web/**',
-      '**/*.js',
-      '**/*.mjs',
-    ],
+    ignores: ['.claude/**', '**/dist/**', '**/coverage/**', 'apps/web/**', '**/*.js', '**/*.mjs'],
   },
   eslint.configs.recommended,
   ...tseslint.configs.strictTypeChecked,
