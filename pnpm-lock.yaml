@@ -39,6 +39,14 @@ importers:
         specifier: ^8.73.0
         version: 8.73.0(eslint@9.39.5)(typescript@5.9.3)
 
+  packages/core: {}
+
+  packages/infrastructure:
+    dependencies:
+      '@code-guardian/core':
+        specifier: workspace:*
+        version: link:../core
+
 packages:
 
   '@babel/code-frame@7.29.7':
