@@ -1,0 +1,14 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "rootDir": "..",
+    "outDir": "dist",
+    "types": ["node", "jest"],
+    // Type-check and test against core's sources, so `pnpm -r typecheck` does not need core built first.
+    "paths": {
+      "@code-guardian/core": ["../core/src"],
+      "@code-guardian/core/testing": ["../core/src/testing"]
+    }
+  },
+  "include": ["src", "test", "scripts"]
+}

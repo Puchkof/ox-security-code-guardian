@@ -1,0 +1,25 @@
+{
+  "name": "@code-guardian/nest-common",
+  "version": "0.1.0",
+  "private": true,
+  "description": "NestJS glue shared by the API and the worker: port tokens, CQRS binding, adapter modules",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@code-guardian/core": "workspace:*",
+    "@code-guardian/infrastructure": "workspace:*",
+    "@nestjs/common": "^11.2.11",
+    "@nestjs/config": "^4.0.4",
+    "@nestjs/cqrs": "^11.0.3",
+    "@prisma/client": "6.19.3",
+    "nestjs-pino": "^4.6.1",
+    "pino": "^9.14.0",
+    "pino-http": "^10.5.0",
+    "reflect-metadata": "^0.2.2",
+    "rxjs": "^7.8.2"
+  }
+}
