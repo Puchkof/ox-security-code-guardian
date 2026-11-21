@@ -1,0 +1,18 @@
+# OOM drill: feed the real worker a 500MB+ Trivy report inside its 200MB container.
+#
+#   pnpm bench:build && pnpm bench:gen        # writes fixtures/generated/trivy-600mb.json
+#   docker compose -f docker-compose.yml -f docker-compose.oom.yml up -d worker
+#   curl -XPOST localhost:3000/api/scan -H 'content-type: application/json' \
+#        -d '{"repoUrl":"https://github.com/OWASP/NodeGoat"}'
+#   docker stats code-guardian-worker-1
+#
+# The repo is still cloned for real; only the Trivy step is replaced by scripts/fake-trivy.sh.
+services:
+  worker:
+    environment:
+      TRIVY_BINARY: /opt/drill/fake-trivy.sh
+      FAKE_TRIVY_REPORT: /opt/drill/fixtures/trivy-600mb.json
+      SCAN_TIMEOUT_MS: '900000'
+    volumes:
+      - ./scripts/fake-trivy.sh:/opt/drill/fake-trivy.sh:ro
+      - ./fixtures/generated:/opt/drill/fixtures:ro

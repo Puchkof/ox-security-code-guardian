@@ -1,0 +1,11 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "rootDir": "src",
+    "types": ["node"],
+    // The build consumes core's compiled output (package.json "types"), not its sources.
+    "paths": {}
+  },
+  "include": ["src"],
+  "exclude": ["**/*.spec.ts"]
+}

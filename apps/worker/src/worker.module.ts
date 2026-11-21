@@ -1,0 +1,46 @@
+import { BullModule } from '@nestjs/bullmq';
+import { Module, type DynamicModule } from '@nestjs/common';
+import { ConfigModule, ConfigService } from '@nestjs/config';
+import { CqrsModule } from '@nestjs/cqrs';
+import { LoggerModule } from 'nestjs-pino';
+import { PersistenceModule, SystemModule } from '@code-guardian/nest-common';
+import { Redis } from 'ioredis';
+import { ScanPipelineModule } from './adapters/scan-pipeline.module';
+import { validateWorkerEnv, type WorkerEnv } from './config/env.schema';
+import { ScanWorkerModule } from './scan/scan-worker.module';
+
+/**
+ * Root of the worker process: config, logging, Redis connection, CQRS, adapters, consumer.
+ * A `forRoot()` factory so importing this file has no side effects (env is read on creation).
+ */
+@Module({})
+export class WorkerModule {
+  static forRoot(): DynamicModule {
+    return {
+      module: WorkerModule,
+      imports: [
+        ConfigModule.forRoot({ isGlobal: true, cache: true, validate: validateWorkerEnv }),
+        LoggerModule.forRootAsync({
+          inject: [ConfigService],
+          useFactory: (config: ConfigService<WorkerEnv, true>) => ({
+            pinoHttp: { level: config.get('LOG_LEVEL', { infer: true }) },
+          }),
+        }),
+        BullModule.forRootAsync({
+          inject: [ConfigService],
+          useFactory: (config: ConfigService<WorkerEnv, true>) => ({
+            // Workers block on Redis; ioredis must not give up on long-running commands.
+            connection: new Redis(config.get('REDIS_URL', { infer: true }), {
+              maxRetriesPerRequest: null,
+            }),
+          }),
+        }),
+        CqrsModule.forRoot(),
+        PersistenceModule.prisma(),
+        SystemModule,
+        ScanPipelineModule,
+        ScanWorkerModule,
+      ],
+    };
+  }
+}
